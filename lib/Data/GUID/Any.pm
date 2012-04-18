@@ -1,23 +1,16 @@
-# Copyright (c) 2009 by David Golden. All rights reserved.
-# Licensed under Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# A copy of the License was distributed with this file or you may obtain a
-# copy of the License from http://www.apache.org/licenses/LICENSE-2.0
-
-package Data::GUID::Any;
 use 5.006;
 use strict;
 use warnings;
-use Config;
-use File::Spec;
-use base 'Exporter';
+package Data::GUID::Any;
+# ABSTRACT: Generic interface for GUID/UUID creation
+our $VERSION = '0.003'; # VERSION
 
-our $VERSION = '0.002';
-$VERSION = eval $VERSION; ## no critic
+use IPC::Cmd;
+use Exporter;
+our @ISA = qw/Exporter/;
+our @EXPORT_OK = qw/ guid_as_string v1_guid_as_string v4_guid_as_string/;
 
-our @EXPORT_OK = qw/ guid_as_string /;
-
-our $Using;
+our ($Using_vX, $Using_v1, $Using_v4) = ("") x 3;
 
 #--------------------------------------------------------------------------#
 
@@ -30,161 +23,348 @@ sub _looks_like_guid {
 
 #--------------------------------------------------------------------------#
 
-my @binaries = (
-  [ uuid => 'uuid' => '-v1'],
+# state variables for generator closures
+my ($dumt_v1, $dumt_v4, $uuid_v1, $uuid_v4) = (undef) x 4; # reset if reloaded
+
+my %generators = (
+  # v1 or v4
+  'Data::UUID::MT' => {
+    type => 'module',
+    v1 => sub {
+      $dumt_v1 ||= Data::UUID::MT->new(version => 1);
+      return uc $dumt_v1->create_string;
+    },
+    v4 => sub {
+      $dumt_v4 ||= Data::UUID::MT->new(version => 4);
+      return uc $dumt_v4->create_string;
+    },
+  },
+  'Data::UUID::LibUUID' => {
+    type => 'module',
+    v1 => sub { return uc Data::UUID::LibUUID::new_uuid_string(2) },
+    v4 => sub { return uc Data::UUID::LibUUID::new_uuid_string(4) },
+    vX => sub { return uc Data::UUID::LibUUID::new_uuid_string() },
+  },
+  'UUID::Tiny' => {
+    type => 'module',
+    v1 => sub { return uc UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V1()) },
+    v4 => sub { return uc UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V4()) },
+  },
+  'uuid' => {
+    type => 'binary',
+    v1 => sub {
+      $uuid_v1 ||= IPC::Cmd::can_run('uuid');
+      chomp( my $guid = qx/$uuid_v1 -v1/ ); return uc $guid;
+    },
+    v4 => sub {
+      $uuid_v4 ||= IPC::Cmd::can_run('uuid');
+      chomp( my $guid = qx/$uuid_v4 -v4/ ); return uc $guid;
+    },
+  },
+  # v1 only
+  'Data::GUID' => {
+    type => 'module',
+    v1 => sub { return uc Data::GUID->new->as_string },
+  },
+  'Data::UUID' => {
+    type => 'module',
+    v1 => sub { return uc Data::UUID->new->create_str },
+  },
+  # system dependent or custom
+  'UUID' => {
+    type => 'module',
+    vX => sub { my ($u,$s); UUID::generate($u); UUID::unparse($u, $s); return uc $s },
+  },
+  'Win32' => {
+    type => 'module',
+    vX => sub { my $guid = Win32::GuidGen(); return uc substr($guid,1,-1) },
+  },
+  'APR::UUID' => {
+    type => 'module',
+    vX => sub { return uc APR::UUID->new->format },
+  },
 );
 
-sub _check_binaries {
-  BIN:
-  for my $bin ( @binaries ) {
-    my ($name, $cmd, $args) = @$bin;
-    my $path;
-    my @suffixes = $^O eq 'MSWin32' ? (qw/.exe .com .bat/) : ( '' );
-    SUFFIX:
-    for my $suffix ( @suffixes ) {
-      ($path) = grep { -x }
-                map { File::Spec->catfile( $_, $cmd ) . $suffix }
-                File::Spec->path;
-      next SUFFIX unless $path;
-    }
-    next BIN unless $path;
-    my $sub = sub { chomp( my $guid = qx/$path $args/ ); return uc $guid };
-    return ($name, $sub) if _looks_like_guid( $sub->() );
-  }
-}
-
-#--------------------------------------------------------------------------#
-
-my @modules = (
-  ['Data::GUID' => sub { return Data::GUID->new->as_string }],
-  ['Data::UUID' => sub { return Data::UUID->new->create_str }],
-  ['Data::UUID::LibUUID' => sub{ return uc Data::UUID::LibUUID::new_uuid_string() }],
-  ['UUID' => sub { my ($u,$s); UUID::generate($u); UUID::unparse($u, $s); return uc $s }],
-  ['Win32' => sub { my $guid = Win32::GuidGen(); return substr($guid,1,-1) }],
-  ['UUID::Generator::PurePerl' => sub { return uc UUID::Generator::PurePerl->new->generate_v1->as_string }],
-  ['APR::UUID' => sub { return uc APR::UUID->new->format }],
-  ['UUID::Random' => sub { return uc UUID::Random::generate() }],
-);
-
-sub _preferred_modules { 
-  return map { $_->[0] } @modules;
-}
-
-sub _check_modules {
-  for my $option ( @modules ) {
-    my ($mod,$sub) = @$option;
-    next unless eval "require $mod; 1";
-    return ($mod, $sub) if _looks_like_guid( $sub->() );
-  }
-}
-
-#--------------------------------------------------------------------------#
-
-my ($which_bin, $bin_sub) = _check_binaries();
-my ($which_mod, $mod_sub) = _check_modules();
-
-die "Couldn't find a GUID module or binary" unless $bin_sub || $mod_sub;
-
-{
-  no warnings;
-  if ( $mod_sub ) {
-    *guid_as_string = $mod_sub;
-    $Using = $which_mod
+our $NO_BINARY; # for testing
+sub _is_available {
+  my ($name) = @_;
+  if ( $generators{$name}{type} eq 'binary' ) {
+    return $NO_BINARY ? undef : IPC::Cmd::can_run($name);
   }
   else {
-    *guid_as_string = $bin_sub;
-    $Using = $which_bin
+    return eval "require $name";
+  }
+}
+
+sub _best_generator {
+  my ($list) = @_;
+  for my $option ( @$list ) {
+    my ($name, $version) = @$option;
+    next unless my $g = $generators{$name};
+    next unless _is_available($name);
+    return ($name, $g->{$version})
+      if $g->{$version} && _looks_like_guid( $g->{$version}->() );
+  }
+  return;
+}
+
+#--------------------------------------------------------------------------#
+
+my %sets = (
+  any => [
+    ['Data::UUID::MT'       => 'v4'],
+    ['Data::GUID'           => 'v1'],
+    ['Data::UUID'           => 'v1'],
+    ['Data::UUID::LibUUID'  => 'vX'],
+    ['UUID'                 => 'vX'],
+    ['Win32'                => 'vX'],
+    ['uuid'                 => 'v1'],
+    ['APR::UUID'            => 'vX'],
+    ['UUID::Tiny'           => 'v1'],
+  ],
+  v1 => [
+    ['Data::UUID::MT'       => 'v1'],
+    ['Data::GUID'           => 'v1'],
+    ['Data::UUID'           => 'v1'],
+    ['Data::UUID::LibUUID'  => 'v1'],
+    ['uuid'                 => 'v1'],
+    ['UUID::Tiny'           => 'v1'],
+  ],
+  v4 => [
+    ['Data::UUID::MT'       => 'v4'],
+    ['Data::UUID::LibUUID'  => 'v4'],
+    ['uuid'                 => 'v4'],
+    ['UUID::Tiny'           => 'v4'],
+  ],
+);
+
+sub _generator_set { return $sets{$_[0]} }
+
+{
+  no warnings qw/once redefine/;
+  {
+    my ($n, $s) = _best_generator(_generator_set("any"));
+    die "Couldn't find a GUID provider" unless $n;
+    *guid_as_string = $s;
+    $Using_vX = $n;
+  }
+  {
+    my ($n, $s) = _best_generator(_generator_set("v1"));
+    *v1_guid_as_string = $s || sub { die "No v1 GUID provider found\n" };
+    $Using_v1 = $n || '';
+  }
+  {
+    my ($n, $s) = _best_generator(_generator_set("v4"));
+    *v4_guid_as_string = $s || sub { die "No v4 GUID provider found\n" };
+    $Using_v4 = $n || '';
   }
 }
 
 1;
 
-__END__
 
-=begin wikidoc
 
-= NAME
+=pod
 
-Data::GUID::Any - Generic interface for GUID creation
+=head1 NAME
 
-= VERSION
+Data::GUID::Any - Generic interface for GUID/UUID creation
 
-This documentation describes version %%VERSION%%.
+=head1 VERSION
 
-= SYNOPSIS
+version 0.003
+
+=head1 SYNOPSIS
 
     use Data::GUID::Any 'guid_as_string';
 
     my $guid = guid_as_string();
 
-= DESCRIPTION
+=head1 DESCRIPTION
 
-This module is a generic wrapper around various ways of obtaining 
-Globally Unique ID's (GUID's).  It will use any of the following, listed
-from most preferred to least preferred:
+This module is a generic wrapper around various ways of obtaining Globally
+Unique ID's (GUID's), also known as Universally Unique Identifiers (UUID's).
 
-* [Data::GUID]
-* [Data::UUID]
-* [Data::UUID::LibUUID]
-* [UUID]
-* [Win32] (using GuidGen())
-* [UUID::Generator::PurePerl]
-* [APR::UUID] (random)
-* [UUID::Random] (random)
-* uuid (external program)
+On installation, if Data::GUID::Any can't detect a way of generating both
+version 1 and version 4 GUID's, it will add either Data::UUID::MT or UUID::Tiny
+as a prerequisite, depending on whether or not a compiler is available.
 
-If none are available when Data::GUID::Any is installed, it will 
-add Data::GUID as a prerequisite.
+=head1 USAGE
 
-= USAGE
+The following functions are available for export.
 
-== guid_as_string()
+=head2 guid_as_string()
 
     my $guid = guid_as_string();
 
-Returns a guid in string format with upper-case hex characters:  
+Returns a guid in string format with upper-case hex characters:
 
   FA2D5B34-23DB-11DE-B548-0018F34EC37C
 
-Except for modules that only produce random GUID's, these are 'version 1'
-GUID's.
+This is the most general subroutine that offers the least amount of control
+over the result.  This routine returns whatever is the default type of GUID for
+a source, which could be version 1 or version 4 (or, in the case of Win32,
+something resembling a version 1, but specific to Microsoft).
 
-= BUGS
+It will use any of the following sources, listed from most preferred to least
+preferred:
 
-Please report any bugs or feature requests using the CPAN Request Tracker
-web interface at [http://rt.cpan.org/Dist/Display.html?Queue=Data-GUID-Any]
+=over 4
 
-When submitting a bug or request, please include a test-file or a patch to an
-existing test-file that illustrates the bug or desired feature.
+=item *
 
-= SEE ALSO
+L<Data::UUID::MT> (v4)
 
-* RFC 4122 [http://tools.ietf.org/html/rfc4122]
+=item *
 
-= AUTHOR
+L<Data::GUID> (v1)
 
-David A. Golden (DAGOLDEN)
+=item *
 
-= COPYRIGHT AND LICENSE
+L<Data::UUID> (v1)
 
-Copyright (c) 2009 by David A. Golden. All rights reserved.
+=item *
 
-Licensed under Apache License, Version 2.0 (the "License").
-You may not use this file except in compliance with the License.
-A copy of the License was distributed with this file or you may obtain a
-copy of the License from http://www.apache.org/licenses/LICENSE-2.0
+L<Data::UUID::LibUUID> (v4 or v1)
 
-Files produced as output though the use of this software, shall not be
-considered Derivative Works, but shall be considered the original work of the
-Licensor.
+=item *
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+L<UUID> (v4 or v1)
 
-=end wikidoc
+=item *
+
+L<Win32> (using GuidGen()) (similar to v1)
+
+=item *
+
+uuid (external program) (v1)
+
+=item *
+
+L<APR::UUID> (v4 or v1)
+
+=item *
+
+L<UUID::Tiny> (v1)
+
+=back
+
+At least one of them is guaranteed to exist or Data::GUID::Any will
+throw an exception when loaded. This shouldn't happen if prerequisites
+were correctly installed.
+
+=head2 v1_guid_as_string()
+
+    my $guid = v1_guid_as_string();
+
+Returns a version 1 (timestamp+MAC/random-identifier) GUID in string format
+with upper-case hex characters from one of the following sources:
+
+=over 4
+
+=item *
+
+L<Data::UUID::MT>
+
+=item *
+
+L<Data::GUID>
+
+=item *
+
+L<Data::UUID>
+
+=item *
+
+L<Data::UUID::LibUUID>
+
+=item *
+
+uuid (external program)
+
+=item *
+
+L<UUID::Tiny>
+
+=back
+
+If none of them are available, an exception will be thrown when this is called.
+This shouldn't happen if prerequisites were correctly installed.
+
+=head2 v4_guid_as_string()
+
+    my $guid = v4_guid_as_string();
+
+Returns a version 4 (random) GUID in string format with upper-case hex
+characters from one of the following modules:
+
+=over 4
+
+=item *
+
+L<Data::UUID::MT>
+
+=item *
+
+L<Data::UUID::LibUUID>
+
+=item *
+
+uuid (external program)
+
+=item *
+
+L<UUID::Tiny>
+
+=back
+
+If none of them are available, an exception will be thrown when this is called.
+This shouldn't happen if prerequisites were correctly installed.
+
+=head1 SEE ALSO
+
+=over 4
+
+=item *
+
+RFC 4122 [http://tools.ietf.org/html/rfc4122]
+
+=back
+
+=for :stopwords cpan testmatrix url annocpan anno bugtracker rt cpants kwalitee diff irc mailto metadata placeholders metacpan
+
+=head1 SUPPORT
+
+=head2 Bugs / Feature Requests
+
+Please report any bugs or feature requests through the issue tracker
+at L<http://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any>.
+You will be notified automatically of any progress on your issue.
+
+=head2 Source Code
+
+This is open source software.  The code repository is available for
+public review and contribution under the terms of the license.
+
+L<https://github.com/dagolden/data-guid-any>
+
+  git clone https://github.com/dagolden/data-guid-any.git
+
+=head1 AUTHOR
+
+David Golden <dagolden@cpan.org>
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is Copyright (c) 2012 by David Golden.
+
+This is free software, licensed under:
+
+  The Apache License, Version 2.0, January 2004
 
 =cut
+
+
+__END__
+
 

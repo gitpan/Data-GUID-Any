@@ -1,34 +1,43 @@
 ---
-name: Data-GUID-Any
-version: 0.002
+abstract: 'Generic interface for GUID/UUID creation'
 author:
   - 'David Golden <dagolden@cpan.org>'
-abstract: Generic interface for GUID creation
-license: apache
-resources:
-  bugtracker: http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-GUID-Any
-  repository: http://github.com/dagolden/data-guid-any/
-requires:
-  Exporter: 0
-  File::Spec: 3.12
-  base: 0
-  perl: 5.006
 build_requires:
+  Config: 0
   File::Find: 0
-  Test::More: 0.62
+  File::Spec: 0
+  File::Temp: 0
+  Test::More: 0.92
+configure_requires:
+  ExtUtils::CBuilder: 0.26
+  ExtUtils::MakeMaker: 6.30
+dynamic_config: 1
+generated_by: 'Dist::Zilla version 4.300014, CPAN::Meta::Converter version 2.120630'
+license: apache
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: Data-GUID-Any
+no_index:
+  directory:
+    - t
+    - xt
+    - examples
+    - corpus
+  package:
+    - DB
 provides:
   Data::GUID::Any:
     file: lib/Data/GUID/Any.pm
-    version: 0.002
-generated_by: Module::Build version 0.32
-meta-spec:
-  url: http://module-build.sourceforge.net/META-spec-v1.2.html
-  version: 1.2
-no_index:
-  directory:
-    - examples
-    - inc
-    - t
-    - xt
-configure_requires:
-  Module::Build: 0.3
+    version: 0.003
+requires:
+  Exporter: 0
+  IPC::Cmd: 0
+  perl: 5.006
+  strict: 0
+  warnings: 0
+resources:
+  bugtracker: http://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any
+  homepage: https://github.com/dagolden/data-guid-any
+  repository: https://github.com/dagolden/data-guid-any.git
+version: 0.003
