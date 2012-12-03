@@ -2,7 +2,7 @@ NAME
     Data::GUID::Any - Generic interface for GUID/UUID creation
 
 VERSION
-    version 0.003
+    version 0.004
 
 SYNOPSIS
         use Data::GUID::Any 'guid_as_string';
@@ -18,6 +18,14 @@ DESCRIPTION
     both version 1 and version 4 GUID's, it will add either Data::UUID::MT
     or UUID::Tiny as a prerequisite, depending on whether or not a compiler
     is available.
+
+    For legacy compatibility with Data::UUID, guid strings are returned
+    uppercase, even though RFC 4122 specifies that generators should provide
+    lower-case strings. To force lower case results from Data::GUID::Any,
+    set $Data::GUID::Any::UC to a false value.
+
+      local $Data::GUID::Any::UC;
+      guid_as_string(); # will be lower case
 
 USAGE
     The following functions are available for export.
@@ -104,7 +112,7 @@ SEE ALSO
 SUPPORT
   Bugs / Feature Requests
     Please report any bugs or feature requests through the issue tracker at
-    <http://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any>. You
+    <https://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any>. You
     will be notified automatically of any progress on your issue.
 
   Source Code
@@ -113,7 +121,7 @@ SUPPORT
 
     <https://github.com/dagolden/data-guid-any>
 
-      git clone https://github.com/dagolden/data-guid-any.git
+      git clone git://github.com/dagolden/data-guid-any.git
 
 AUTHOR
     David Golden <dagolden@cpan.org>

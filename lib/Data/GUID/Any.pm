@@ -3,7 +3,7 @@ use strict;
 use warnings;
 package Data::GUID::Any;
 # ABSTRACT: Generic interface for GUID/UUID creation
-our $VERSION = '0.003'; # VERSION
+our $VERSION = '0.004'; # VERSION
 
 use IPC::Cmd;
 use Exporter;
@@ -11,14 +11,22 @@ our @ISA = qw/Exporter/;
 our @EXPORT_OK = qw/ guid_as_string v1_guid_as_string v4_guid_as_string/;
 
 our ($Using_vX, $Using_v1, $Using_v4) = ("") x 3;
+our $UC = 1;
 
 #--------------------------------------------------------------------------#
 
-my $hex = "A-Z0-9";
+my $hex = "a-z0-9";
 
+# case insensitive, since used to check if generators are functioning
 sub _looks_like_guid {
   my $guid = shift;
-  return $guid =~ /[$hex]{8}-[$hex]{4}-[$hex]{4}-[$hex]{4}-[$hex]{12}/;
+  return $guid =~ /[$hex]{8}-[$hex]{4}-[$hex]{4}-[$hex]{4}-[$hex]{12}/i;
+}
+
+#--------------------------------------------------------------------------#
+
+sub _xc {
+  return $UC ? uc($_[0]) : lc($_[0]);
 }
 
 #--------------------------------------------------------------------------#
@@ -32,56 +40,56 @@ my %generators = (
     type => 'module',
     v1 => sub {
       $dumt_v1 ||= Data::UUID::MT->new(version => 1);
-      return uc $dumt_v1->create_string;
+      return _xc( $dumt_v1->create_string );
     },
     v4 => sub {
       $dumt_v4 ||= Data::UUID::MT->new(version => 4);
-      return uc $dumt_v4->create_string;
+      return _xc( $dumt_v4->create_string );
     },
   },
   'Data::UUID::LibUUID' => {
     type => 'module',
-    v1 => sub { return uc Data::UUID::LibUUID::new_uuid_string(2) },
-    v4 => sub { return uc Data::UUID::LibUUID::new_uuid_string(4) },
-    vX => sub { return uc Data::UUID::LibUUID::new_uuid_string() },
+    v1 => sub { return _xc( Data::UUID::LibUUID::new_uuid_string(2) ) },
+    v4 => sub { return _xc( Data::UUID::LibUUID::new_uuid_string(4) ) },
+    vX => sub { return _xc( Data::UUID::LibUUID::new_uuid_string() ) },
   },
   'UUID::Tiny' => {
     type => 'module',
-    v1 => sub { return uc UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V1()) },
-    v4 => sub { return uc UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V4()) },
+    v1 => sub { return _xc( UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V1()) ) },
+    v4 => sub { return _xc( UUID::Tiny::create_UUID_as_string(UUID::Tiny::UUID_V4()) ) },
   },
   'uuid' => {
     type => 'binary',
     v1 => sub {
       $uuid_v1 ||= IPC::Cmd::can_run('uuid');
-      chomp( my $guid = qx/$uuid_v1 -v1/ ); return uc $guid;
+      chomp( my $guid = qx/$uuid_v1 -v1/ ); return _xc( $guid );
     },
     v4 => sub {
       $uuid_v4 ||= IPC::Cmd::can_run('uuid');
-      chomp( my $guid = qx/$uuid_v4 -v4/ ); return uc $guid;
+      chomp( my $guid = qx/$uuid_v4 -v4/ ); return _xc( $guid );
     },
   },
   # v1 only
   'Data::GUID' => {
     type => 'module',
-    v1 => sub { return uc Data::GUID->new->as_string },
+    v1 => sub { return _xc( Data::GUID->new->as_string ) },
   },
   'Data::UUID' => {
     type => 'module',
-    v1 => sub { return uc Data::UUID->new->create_str },
+    v1 => sub { return _xc( Data::UUID->new->create_str ) },
   },
   # system dependent or custom
   'UUID' => {
     type => 'module',
-    vX => sub { my ($u,$s); UUID::generate($u); UUID::unparse($u, $s); return uc $s },
+    vX => sub { my ($u,$s); UUID::generate($u); UUID::unparse($u, $s); return _xc( $s ) },
   },
   'Win32' => {
     type => 'module',
-    vX => sub { my $guid = Win32::GuidGen(); return uc substr($guid,1,-1) },
+    vX => sub { my $guid = Win32::GuidGen(); return _xc( substr($guid,1,-1) ) },
   },
   'APR::UUID' => {
     type => 'module',
-    vX => sub { return uc APR::UUID->new->format },
+    vX => sub { return _xc( APR::UUID->new->format ) },
   },
 );
 
@@ -162,7 +170,7 @@ sub _generator_set { return $sets{$_[0]} }
 
 1;
 
-
+__END__
 
 =pod
 
@@ -172,7 +180,7 @@ Data::GUID::Any - Generic interface for GUID/UUID creation
 
 =head1 VERSION
 
-version 0.003
+version 0.004
 
 =head1 SYNOPSIS
 
@@ -188,6 +196,14 @@ Unique ID's (GUID's), also known as Universally Unique Identifiers (UUID's).
 On installation, if Data::GUID::Any can't detect a way of generating both
 version 1 and version 4 GUID's, it will add either Data::UUID::MT or UUID::Tiny
 as a prerequisite, depending on whether or not a compiler is available.
+
+For legacy compatibility with L<Data::UUID>, guid strings are returned uppercase,
+even though RFC 4122 specifies that generators should provide lower-case strings.
+To force lower case results from Data::GUID::Any, set C<$Data::GUID::Any::UC>
+to a false value.
+
+  local $Data::GUID::Any::UC;
+  guid_as_string(); # will be lower case
 
 =head1 USAGE
 
@@ -338,7 +354,7 @@ RFC 4122 [http://tools.ietf.org/html/rfc4122]
 =head2 Bugs / Feature Requests
 
 Please report any bugs or feature requests through the issue tracker
-at L<http://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any>.
+at L<https://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any>.
 You will be notified automatically of any progress on your issue.
 
 =head2 Source Code
@@ -348,7 +364,7 @@ public review and contribution under the terms of the license.
 
 L<https://github.com/dagolden/data-guid-any>
 
-  git clone https://github.com/dagolden/data-guid-any.git
+  git clone git://github.com/dagolden/data-guid-any.git
 
 =head1 AUTHOR
 
@@ -363,8 +379,3 @@ This is free software, licensed under:
   The Apache License, Version 2.0, January 2004
 
 =cut
-
-
-__END__
-
-

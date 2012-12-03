@@ -12,7 +12,7 @@ configure_requires:
   ExtUtils::CBuilder: 0.26
   ExtUtils::MakeMaker: 6.30
 dynamic_config: 1
-generated_by: 'Dist::Zilla version 4.300014, CPAN::Meta::Converter version 2.120630'
+generated_by: 'Dist::Zilla version 4.300028, CPAN::Meta::Converter version 2.120921'
 license: apache
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -29,7 +29,7 @@ no_index:
 provides:
   Data::GUID::Any:
     file: lib/Data/GUID/Any.pm
-    version: 0.003
+    version: 0.004
 requires:
   Exporter: 0
   IPC::Cmd: 0
@@ -37,7 +37,7 @@ requires:
   strict: 0
   warnings: 0
 resources:
-  bugtracker: http://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any
-  homepage: https://github.com/dagolden/data-guid-any
-  repository: https://github.com/dagolden/data-guid-any.git
-version: 0.003
+  bugtracker: https://rt.cpan.org/Public/Dist/Display.html?Name=Data-GUID-Any
+  homepage: https://metacpan.org/release/Data-GUID-Any
+  repository: git://github.com/dagolden/data-guid-any.git
+version: 0.004
